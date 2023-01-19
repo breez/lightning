@@ -1848,17 +1848,7 @@ u8 *handle_node_announcement(struct routing_state *rstate, const u8 *node_ann,
 					&node_id, rgb_color, alias,
 					&addresses,
 					&na_tlv)) {
-		/* BOLT #7:
-		 *
-		 *   - if `node_id` is NOT a valid compressed public key:
-		 *    - SHOULD send a `warning`.
-		 *    - MAY close the connection.
-		 *    - MUST NOT process the message further.
-		 */
-		u8 *warn = towire_warningfmt(rstate, NULL,
-					    "Malformed node_announcement %s",
-					    tal_hex(tmpctx, node_ann));
-		return warn;
+		return NULL;
 	}
 
 	sha256_double(&hash, serialized + 66, tal_count(serialized) - 66);
