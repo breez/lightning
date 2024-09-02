@@ -2282,6 +2282,7 @@ void payment_continue(struct payment *p)
 	void *moddata;
 
 	trace_span_start("payment_continue", p);
+	trace_span_tag(p, "step", payment_step_str[p->step]);
 	/* If we are in the middle of calling the modifiers, continue calling
 	 * them, otherwise we can continue with the payment state-machine. */
 	p->current_modifier++;
@@ -2298,7 +2299,6 @@ void payment_continue(struct payment *p)
 		/* There are no more modifiers, so reset the call chain and
 		 * proceed to the next state. */
 		p->current_modifier = -1;
-		trace_span_tag(p, "step", payment_step_str[p->step]);
 		trace_span_end(p);
 		switch (p->step) {
 		case PAYMENT_STEP_INITIALIZED:
