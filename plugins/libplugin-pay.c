@@ -911,14 +911,20 @@ static struct command_result *payment_getroute(struct payment *p)
 	const char *errstr;
 	struct gossmap *gossmap;
 
+	trace_span_start("payment_getroute", p->on_payment_failure);
 	/* If we retry the getroute call we might already have a route, so
 	 * free an eventual stale route. */
 	p->route = tal_free(p->route);
 
+	trace_span_start("get_gossmap", p->route);
 	gossmap = get_gossmap(p);
+	trace_span_end(p->route);
 
+	trace_span_start("gossmap_find_node->dst", p->route);
 	dst = gossmap_find_node(gossmap, p->getroute->destination);
+	trace_span_end(p->route);
 	if (!dst) {
+		trace_span_end(p->on_payment_failure);
 		put_gossmap(p);
 		payment_fail(
 			p, "Unknown destination %s",
@@ -928,9 +934,12 @@ static struct command_result *payment_getroute(struct payment *p)
 		return command_still_pending(p->cmd);
 	}
 
+	trace_span_start("gossmap_find_node->src", p->route);
 	/* If we don't exist in gossip, routing can't happen. */
 	src = gossmap_find_node(gossmap, p->local_id);
+	trace_span_end(p->route);
 	if (!src) {
+		trace_span_end(p->on_payment_failure);
 		put_gossmap(p);
 		payment_fail(p, "We don't have any channels");
 
@@ -938,12 +947,18 @@ static struct command_result *payment_getroute(struct payment *p)
 		return command_still_pending(p->cmd);
 	}
 
+	trace_span_start("route", gossmap);
 	p->route = route(p, gossmap, src, dst, p->getroute->amount, p->getroute->cltv,
 			 p->getroute->riskfactorppm / 1000000.0, p->getroute->max_hops,
 			 p, &errstr);
+	trace_span_end(gossmap);
+
+	trace_span_start("put_gossmap", gossmap);
 	put_gossmap(p);
+	trace_span_end(gossmap);
 
 	if (!p->route) {
+		trace_span_end(p->on_payment_failure);
 		payment_fail(p, "%s", errstr);
 		/* Let payment_finished_ handle this, so we mark it as pending */
 		return command_still_pending(p->cmd);
@@ -953,6 +968,7 @@ static struct command_result *payment_getroute(struct payment *p)
 	p->step = PAYMENT_STEP_GOT_ROUTE;
 
 	if (tal_count(p->route) == 0) {
+		trace_span_end(p->on_payment_failure);
 		payment_root(p)->abort = true;
 		payment_fail(p, "Empty route returned by getroute, are you "
 				"trying to pay yourself?");
@@ -962,6 +978,7 @@ static struct command_result *payment_getroute(struct payment *p)
 
 	/* Ensure that our fee and CLTV budgets are respected. */
 	if (amount_msat_greater(fee, p->constraints.fee_budget)) {
+		trace_span_end(p->on_payment_failure);
 		payment_exclude_most_expensive(p);
 		p->route = tal_free(p->route);
 		payment_fail(
@@ -972,6 +989,7 @@ static struct command_result *payment_getroute(struct payment *p)
 	}
 
 	if (p->route[0].delay > p->constraints.cltv_budget) {
+		trace_span_end(p->on_payment_failure);
 		u32 delay = p->route[0].delay;
 		payment_exclude_longest_delay(p);
 		p->route = tal_free(p->route);
@@ -983,11 +1001,13 @@ static struct command_result *payment_getroute(struct payment *p)
 	/* Now update the constraints in fee_budget and cltv_budget so
 	 * modifiers know what constraints they need to adhere to. */
 	if (!payment_constraints_update(&p->constraints, fee, p->route[0].delay)) {
+		trace_span_end(p->on_payment_failure);
 		paymod_log(p, LOG_BROKEN,
 			   "Could not update constraints.");
 		abort();
 	}
 
+	trace_span_end(p->on_payment_failure);
 	/* Allow modifiers to modify the route, before
 	 * payment_compute_onion_payloads uses the route to generate the
 	 * onion_payloads */
