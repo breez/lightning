@@ -865,6 +865,7 @@ static struct route_hop *route(const tal_t *ctx,
 			       struct payment *p,
 			       const char **errmsg)
 {
+	trace_span_start("route", src);
 	const struct dijkstra *dij;
 	struct route_hop *r;
 	bool (*can_carry)(const struct gossmap *,
@@ -874,19 +875,28 @@ static struct route_hop *route(const tal_t *ctx,
 			  struct payment *);
 
 	can_carry = payment_route_can_carry;
+	trace_span_start("route-dijkstra", dst);
 	dij = dijkstra(tmpctx, gossmap, dst, amount, riskfactor,
 		       can_carry, route_score, p);
+	trace_span_end(dst);
+	trace_span_start("route_from_dijkstra", dst);
 	r = route_from_dijkstra(ctx, gossmap, dij, src, amount, final_delay);
+	trace_span_end(dst);
 	if (!r) {
 		/* Try using disabled channels too */
 		/* FIXME: is there somewhere we can annotate this for paystatus? */
 		can_carry = payment_route_can_carry_even_disabled;
+		trace_span_start("!r-dijkstra", dst);
 		dij = dijkstra(tmpctx, gossmap, dst, amount, riskfactor,
 			       can_carry, route_score, p);
+		trace_span_end(dst);
+		trace_span_start("!r-route_from_dijkstra", dst);
 		r = route_from_dijkstra(ctx, gossmap, dij, src,
 					amount, final_delay);
+		trace_span_end(dst);
 		if (!r) {
 			*errmsg = "No path found";
+			trace_span_end(src);
 			return NULL;
 		}
 	}
@@ -894,13 +904,18 @@ static struct route_hop *route(const tal_t *ctx,
 	/* If it's too far, fall back to using shortest path. */
 	if (tal_count(r) > max_hops) {
 		tal_free(r);
+		trace_span_start(">max_hops-dijkstra", dst);
 		/* FIXME: is there somewhere we can annotate this for paystatus? */
 		dij = dijkstra(tmpctx, gossmap, dst, amount, riskfactor,
 			       can_carry, route_score_shorter, p);
+		trace_span_end(dst);
+		trace_span_start(">max_hops-route_from_dijkstra", dst);
 		r = route_from_dijkstra(ctx, gossmap, dij, src,
 					amount, final_delay);
+		trace_span_end(dst);
 		if (!r) {
 			*errmsg = "No path found";
+			trace_span_end(src);
 			return NULL;
 		}
 
@@ -908,11 +923,13 @@ static struct route_hop *route(const tal_t *ctx,
 		if (tal_count(r) > max_hops) {
 			*errmsg = tal_fmt(ctx, "Shortest path found was length %zu",
 					  tal_count(r));
+			trace_span_end(src);
 			return tal_free(r);
 		}
 	}
 
 	*errmsg = NULL;
+	trace_span_end(src);
 	return r;
 }
 
