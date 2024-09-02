@@ -2981,20 +2981,28 @@ static void routehint_check_reachable(struct payment *p)
 
 static void routehint_step_cb(struct routehints_data *d, struct payment *p)
 {
+	trace_span_start("routehint_step_cb", d);
 	struct route_hop hop;
 	const struct payment *root = payment_root(p);
 	struct gossmap *map;
 	if (p->step == PAYMENT_STEP_INITIALIZED) {
-		if (root->routes == NULL)
+		if (root->routes == NULL) {
+			trace_span_tag(d, "end_position", "root->routes == NULL");
+			trace_span_end(d);
 			return payment_continue(p);
+		}
 
 		/* We filter out non-functional routehints once at the
 		 * beginning, and every other payment will filter out the
 		 * exluded ones on the fly. */
 		if (p->parent == NULL) {
+			trace_span_start("get_gossmap", p->on_payment_success);
 			map = get_gossmap(p);
+			trace_span_end(p->on_payment_success);
+			trace_span_start("filter_routehints", p->on_payment_success);
 			d->routehints = filter_routehints(
 			    map, p, d, p->local_id, p->routes);
+			trace_span_end(p->on_payment_success);
 			/* filter_routehints modifies the array, but
 			 * this could trigger a resize and the resize
 			 * could trigger a realloc.
@@ -3015,19 +3023,24 @@ static void routehint_step_cb(struct routehints_data *d, struct payment *p)
 			 * in paymod, paymod should use (and mutate) the
 			 * p->routes array, and
 			 */
+			trace_span_start("put_gossmap", p->on_payment_success);
 			put_gossmap(p);
+			trace_span_end(p->on_payment_success);
 			p->routes = d->routehints;
 
 			paymod_log(p, LOG_DBG,
 				   "After filtering routehints we're left with "
 				   "%zu usable hints",
 				   tal_count(d->routehints));
-			    /* Do not continue normally, instead go and check if
-			     * we can reach the destination directly. */
-			    return routehint_check_reachable(p);
+			/* Do not continue normally, instead go and check if
+			* we can reach the destination directly. */
+			trace_span_end(d);
+			return routehint_check_reachable(p);
 		}
 
+		trace_span_start("routehint_pre_getroute", p->on_payment_success);
 		routehint_pre_getroute(d, p);
+		trace_span_end(p->on_payment_success);
 	} else if (p->step == PAYMENT_STEP_GOT_ROUTE && d->current_routehint != NULL) {
 		/* Now it's time to stitch the two partial routes together. */
 		struct amount_msat dest_amount;
@@ -3060,6 +3073,7 @@ static void routehint_step_cb(struct routehints_data *d, struct payment *p)
 		}
 	}
 
+	trace_span_end(d);
 	payment_continue(p);
 }
 
