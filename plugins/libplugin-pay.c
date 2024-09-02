@@ -692,11 +692,16 @@ static const struct channel_hint *find_hint(const struct channel_hint *hints,
 					    struct short_channel_id scid,
 					    int dir)
 {
+	trace_span_start("find_hint", hints);
 	for (size_t i = 0; i < tal_count(hints); i++) {
 		if (short_channel_id_eq(scid, hints[i].scid.scid)
-		    && dir == hints[i].scid.dir)
+		    && dir == hints[i].scid.dir) {
+		    	trace_span_end(hints);
 			return &hints[i];
+		}
 	}
+
+	trace_span_end(hints);
 	return NULL;
 }
 
@@ -706,18 +711,25 @@ static bool dst_is_excluded(const struct gossmap *gossmap,
 			    int dir,
 			    const struct node_id *nodes)
 {
+	trace_span_start("dst_is_excluded", c);
 	struct node_id dstid;
 
 	/* Premature optimization */
-	if (!tal_count(nodes))
+	if (!tal_count(nodes)) {
+		trace_span_end(c);
 		return false;
+	}
 
 	gossmap_node_get_id(gossmap, gossmap_nth_node(gossmap, c, !dir),
 			    &dstid);
 	for (size_t i = 0; i < tal_count(nodes); i++) {
-		if (node_id_eq(&dstid, &nodes[i]))
+		if (node_id_eq(&dstid, &nodes[i])) {
+			trace_span_end(c);
 			return true;
+		}
 	}
+
+	trace_span_end(c);
 	return false;
 }
 
@@ -2916,6 +2928,7 @@ static void routehint_pre_getroute(struct routehints_data *d, struct payment *p)
 
 static void routehint_check_reachable(struct payment *p)
 {
+	trace_span_start("routehint_check_reachable", p);
 	const struct gossmap_node *dst, *src;
 	struct gossmap *gossmap = get_gossmap(p);
 	const struct dijkstra *dij;
@@ -2927,8 +2940,11 @@ static void routehint_check_reachable(struct payment *p)
 	 * whether we stand any chance of reaching the destination
 	 * without routehints. This will later be used to mix in
 	 * attempts without routehints. */
+	trace_span_start("gossmap_find_node", p->plugin);
 	src = gossmap_find_node(gossmap, p->local_id);
 	dst = gossmap_find_node(gossmap, p->destination);
+	trace_span_end(p->plugin);
+	trace_span_start("dijkstra", p->plugin);
 	if (dst == NULL)
 		d->destination_reachable = false;
 	else if (src != NULL) {
@@ -2948,6 +2964,7 @@ static void routehint_check_reachable(struct payment *p)
 			   "Allowing direct attempts");
 		d->destination_reachable = true;
 	}
+	trace_span_end(p->plugin);
 
 	if (d->destination_reachable) {
 		tal_arr_expand(&d->routehints, NULL);
@@ -2968,6 +2985,7 @@ static void routehint_check_reachable(struct payment *p)
 		 * isn't reachable, then there is no point in
 		 * continuing. */
 
+		trace_span_end(p);
 		payment_abort(
 		    p,
 		    "Destination %s is not reachable directly and "
@@ -2977,7 +2995,9 @@ static void routehint_check_reachable(struct payment *p)
 		return;
 	}
 
+	trace_span_start("routehint_pre_getroute", p->plugin);
 	routehint_pre_getroute(d, p);
+	trace_span_end(p->plugin);
 	put_gossmap(p);
 
 	paymod_log(p, LOG_DBG,
@@ -2986,6 +3006,7 @@ static void routehint_check_reachable(struct payment *p)
 		   d->destination_reachable ? "" : " not",
 		   d->destination_reachable ? "including" : "excluding");
 
+	trace_span_end(p);
 	/* Now we can continue on our merry way. */
 	payment_continue(p);
 }
