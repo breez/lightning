@@ -911,20 +911,18 @@ static struct command_result *payment_getroute(struct payment *p)
 	const char *errstr;
 	struct gossmap *gossmap;
 
-	trace_span_start("payment_getroute", p->on_payment_failure);
 	/* If we retry the getroute call we might already have a route, so
 	 * free an eventual stale route. */
 	p->route = tal_free(p->route);
 
-	trace_span_start("get_gossmap", p->route);
+	trace_span_start("get_gossmap", p->plugin);
 	gossmap = get_gossmap(p);
-	trace_span_end(p->route);
+	trace_span_end(p->plugin);
 
-	trace_span_start("gossmap_find_node->dst", p->route);
+	trace_span_start("gossmap_find_node->dst", p->plugin);
 	dst = gossmap_find_node(gossmap, p->getroute->destination);
-	trace_span_end(p->route);
+	trace_span_end(p->plugin);
 	if (!dst) {
-		trace_span_end(p->on_payment_failure);
 		put_gossmap(p);
 		payment_fail(
 			p, "Unknown destination %s",
@@ -934,12 +932,11 @@ static struct command_result *payment_getroute(struct payment *p)
 		return command_still_pending(p->cmd);
 	}
 
-	trace_span_start("gossmap_find_node->src", p->route);
+	trace_span_start("gossmap_find_node->src", p->plugin);
 	/* If we don't exist in gossip, routing can't happen. */
 	src = gossmap_find_node(gossmap, p->local_id);
-	trace_span_end(p->route);
+	trace_span_end(p->plugin);
 	if (!src) {
-		trace_span_end(p->on_payment_failure);
 		put_gossmap(p);
 		payment_fail(p, "We don't have any channels");
 
@@ -947,18 +944,17 @@ static struct command_result *payment_getroute(struct payment *p)
 		return command_still_pending(p->cmd);
 	}
 
-	trace_span_start("route", gossmap);
+	trace_span_start("route", p->plugin);
 	p->route = route(p, gossmap, src, dst, p->getroute->amount, p->getroute->cltv,
 			 p->getroute->riskfactorppm / 1000000.0, p->getroute->max_hops,
 			 p, &errstr);
-	trace_span_end(gossmap);
+	trace_span_end(p->plugin);
 
-	trace_span_start("put_gossmap", gossmap);
+	trace_span_start("put_gossmap", p->plugin);
 	put_gossmap(p);
-	trace_span_end(gossmap);
+	trace_span_end(p->plugin);
 
 	if (!p->route) {
-		trace_span_end(p->on_payment_failure);
 		payment_fail(p, "%s", errstr);
 		/* Let payment_finished_ handle this, so we mark it as pending */
 		return command_still_pending(p->cmd);
@@ -968,7 +964,6 @@ static struct command_result *payment_getroute(struct payment *p)
 	p->step = PAYMENT_STEP_GOT_ROUTE;
 
 	if (tal_count(p->route) == 0) {
-		trace_span_end(p->on_payment_failure);
 		payment_root(p)->abort = true;
 		payment_fail(p, "Empty route returned by getroute, are you "
 				"trying to pay yourself?");
@@ -978,7 +973,6 @@ static struct command_result *payment_getroute(struct payment *p)
 
 	/* Ensure that our fee and CLTV budgets are respected. */
 	if (amount_msat_greater(fee, p->constraints.fee_budget)) {
-		trace_span_end(p->on_payment_failure);
 		payment_exclude_most_expensive(p);
 		p->route = tal_free(p->route);
 		payment_fail(
@@ -989,7 +983,6 @@ static struct command_result *payment_getroute(struct payment *p)
 	}
 
 	if (p->route[0].delay > p->constraints.cltv_budget) {
-		trace_span_end(p->on_payment_failure);
 		u32 delay = p->route[0].delay;
 		payment_exclude_longest_delay(p);
 		p->route = tal_free(p->route);
@@ -1001,13 +994,11 @@ static struct command_result *payment_getroute(struct payment *p)
 	/* Now update the constraints in fee_budget and cltv_budget so
 	 * modifiers know what constraints they need to adhere to. */
 	if (!payment_constraints_update(&p->constraints, fee, p->route[0].delay)) {
-		trace_span_end(p->on_payment_failure);
 		paymod_log(p, LOG_BROKEN,
 			   "Could not update constraints.");
 		abort();
 	}
 
-	trace_span_end(p->on_payment_failure);
 	/* Allow modifiers to modify the route, before
 	 * payment_compute_onion_payloads uses the route to generate the
 	 * onion_payloads */
@@ -3016,13 +3007,13 @@ static void routehint_step_cb(struct routehints_data *d, struct payment *p)
 		 * beginning, and every other payment will filter out the
 		 * exluded ones on the fly. */
 		if (p->parent == NULL) {
-			trace_span_start("get_gossmap", p->on_payment_success);
+			trace_span_start("get_gossmap", p->plugin);
 			map = get_gossmap(p);
-			trace_span_end(p->on_payment_success);
-			trace_span_start("filter_routehints", p->on_payment_success);
+			trace_span_end(p->plugin);
+			trace_span_start("filter_routehints", p->plugin);
 			d->routehints = filter_routehints(
 			    map, p, d, p->local_id, p->routes);
-			trace_span_end(p->on_payment_success);
+			trace_span_end(p->plugin);
 			/* filter_routehints modifies the array, but
 			 * this could trigger a resize and the resize
 			 * could trigger a realloc.
@@ -3043,9 +3034,9 @@ static void routehint_step_cb(struct routehints_data *d, struct payment *p)
 			 * in paymod, paymod should use (and mutate) the
 			 * p->routes array, and
 			 */
-			trace_span_start("put_gossmap", p->on_payment_success);
+			trace_span_start("put_gossmap", p->plugin);
 			put_gossmap(p);
-			trace_span_end(p->on_payment_success);
+			trace_span_end(p->plugin);
 			p->routes = d->routehints;
 
 			paymod_log(p, LOG_DBG,
@@ -3058,9 +3049,7 @@ static void routehint_step_cb(struct routehints_data *d, struct payment *p)
 			return routehint_check_reachable(p);
 		}
 
-		trace_span_start("routehint_pre_getroute", p->on_payment_success);
 		routehint_pre_getroute(d, p);
-		trace_span_end(p->on_payment_success);
 	} else if (p->step == PAYMENT_STEP_GOT_ROUTE && d->current_routehint != NULL) {
 		/* Now it's time to stitch the two partial routes together. */
 		struct amount_msat dest_amount;
