@@ -2729,6 +2729,9 @@ local_channel_hints_listpeerchannels(struct command *cmd, const char *buffer,
 		}
 	}
 
+	p->mods = gossmods_from_listpeerchannels(
+	    p, p->local_id, buffer, toks, true, gossmod_add_localchan, NULL);
+
 	payment_continue(p);
 	return command_still_pending(cmd);
 }
