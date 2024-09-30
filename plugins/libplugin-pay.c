@@ -3638,6 +3638,7 @@ static void direct_pay_cb(struct direct_pay_data *d, struct payment *p)
 				    direct_pay_listpeerchannels,
 				    direct_pay_listpeerchannels,
 				    p);
+	json_add_node_id(req->js, "id", p->route_destination);
 	send_outreq(p->plugin, req);
 }
 
