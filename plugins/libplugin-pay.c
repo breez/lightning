@@ -512,15 +512,6 @@ static void channel_hints_update(struct payment *p,
 
 		if (modified) {
 			hint->timestamp = timestamp;
-			paymod_log(p, LOG_DBG,
-					"Updated a channel hint for %s: "
-					"enabled %s, "
-					"estimated capacity %s",
-					fmt_short_channel_id_dir(tmpctx,
-					&hint->scid),
-					hint->enabled ? "true" : "false",
-					fmt_amount_msat(tmpctx,
-					hint->estimated_capacity));
 			channel_hint_notify(p->plugin, hint);
 		}
 		return;
@@ -541,13 +532,6 @@ static void channel_hints_update(struct payment *p,
 		newhint->estimated_capacity = *estimated_capacity;
 
 	channel_hint_map_add(root->channel_hints, newhint);
-
-	paymod_log(
-	    p, LOG_DBG,
-	    "Added a channel hint for %s: enabled %s, estimated capacity %s",
-	    fmt_short_channel_id_dir(tmpctx, &newhint->scid),
-	    newhint->enabled ? "true" : "false",
-	    fmt_amount_msat(tmpctx, newhint->estimated_capacity));
 	channel_hint_notify(p->plugin, newhint);
 }
 
